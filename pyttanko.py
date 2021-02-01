@@ -2,30 +2,23 @@
 
 """
 osu! pp and difficulty calculator.
-
 pure python implementation of oppai-ng
 this is meant to be used as a completely standalone python module,
 more portable and easier to use than bindings.
-
 this is over 10 times slower than the C version, so if you need to
 calculate hundreds or thousands of scores you should consider
 using the C version or making python bindings for it.
-
 for comparison, the C version runs through the test suite (~12k
 unique scores) in ~9-10 seconds on my i7-4790k while pyttanko takes
 100+ seconds
-
 if you want a command line interface, check out
 https://github.com/Francesco149/oppai-ng
 -------------------------------------------------------------------
 usage:
 put pyttanko.py in your project's folder and import pyttanko
-
 for example usage, check out the __main__ at the bottom of the file
 you can run it like:
-
     cat /path/to/map.osu | ./pyttanko.py +HDDT 200x 1m 95%
-
 also, check out "pydoc pyttanko" for full documentation
 -------------------------------------------------------------------
 this is free and unencumbered software released into the public
@@ -99,7 +92,6 @@ class slider:
     def __init__(self, pos=None, distance=0.0, repetitions=0):
         """
         initializes a slider object.
-
         distance: distance travelled by one repetition (float)
         pos: instance of v2f. if None, it will be set to v2f()
         """
@@ -126,7 +118,6 @@ class hitobject:
     def __init__(self, time=0.0, objtype=OBJ_CIRCLE, data=None):
         """
         initializes a new hitobject.
-
         time: start time in milliseconds (float)
         data: an instance of circle, slider or None
         """
@@ -193,7 +184,6 @@ class beatmap:
     """
     the bare minimum amount of data about a beatmap to perform
     difficulty and pp calculation
-
     fields:
     mode: gamemode, see MODE_* constants (integer)
     title title_unicode artist artist_unicode
@@ -329,7 +319,6 @@ class beatmap:
 class parser:
     """
     beatmap parser.
-
     fields:
     lastline lastpos: last line and token touched (strings)
     nline: last line number touched
@@ -501,7 +490,6 @@ class parser:
         """
         reads a file object and parses it into a beatmap object
         which is then returned.
-
         if bmap is specified, it will be reused as a pre-allocated
         beatmap object instead of building a new one, speeding
         up parsing slightly because of less allocations
@@ -641,7 +629,6 @@ def mods_apply(mods, ar = None, od = None, cs = None, hp = None):
     """
     calculates speed multiplier, ar, od, cs, hp with the given
     mods applied. returns (speed_mul, ar, od, cs, hp).
-
     the base stats are all optional and default to None. if a base
     stat is None, then it won't be calculated and will also be
     returned as None.
@@ -836,7 +823,6 @@ def d_strain(difftype, obj, prevobj, speed_mul):
 class diff_calc:
     """
     difficulty calculator.
-
     fields:
     total: star rating
     aim: aim stars
@@ -943,9 +929,7 @@ class diff_calc:
         calculates difficulty and stores results in self.total,
         self.aim, self.speed, self.nsingles,
         self.nsingles_threshold.
-
         returns self.
-
         singletap_threshold is the smallest milliseconds interval
         that will be considered singletappable, defaults to 125ms
         which is 240 bpm 1/2 ((60000 / 240) / 2)
@@ -1200,10 +1184,11 @@ def ppv2(
     accuracy = acc_calc(n300, n100, n50, nmiss)
     real_acc = accuracy
 
+    nspinners = nobjects - nsliders - ncircles
     if score_version == 1:
         # scorev1 ignores sliders since they are free 300s
         # for whatever reason it also ignores spinners
-        nspinners = nobjects - nsliders - ncircles
+
         real_acc = acc_calc(
             n300 - nsliders - nspinners, n100, n50, nmiss
         )
@@ -1226,8 +1211,11 @@ def ppv2(
     if nobjects > 2000:
         length_bonus += math.log10(nobjects_over_2k) * 0.5
 
-    miss_penality = pow(0.97, nmiss)
-    combo_break = pow(combo, 0.8) / pow(max_combo, 0.8)
+    miss_penalty = 1
+    if nmiss > 0:
+        miss_penalty = 0.97 * pow(1.0 - pow(nmiss / nobjects, 0.775), nmiss)
+
+    combo_break = min(pow(combo, 0.8) / pow(max_combo, 0.8), 1.0)
 
     # calculate stats with mods
     speed_mul, ar, od, _, _ = (
@@ -1235,38 +1223,38 @@ def ppv2(
     )
 
     # ar bonus ----------------------------------------------------
-    ar_bonus = 1.0
+    ar_bonus = 0.0
 
     if ar > 10.33:
-        ar_bonus += 0.3 * (ar - 10.33)
+        ar_bonus += 0.4 * (ar - 10.33)
 
     elif ar < 8.0:
         ar_bonus += 0.01 * (8.0 - ar)
 
+    ar_bonus = 1 + min(ar_bonus, ar_bonus * (nobjects / 1000))
 
     # aim pp ------------------------------------------------------
     aim = pp_base(aim_stars)
     aim *= length_bonus
-    aim *= miss_penality
+    aim *= miss_penalty
     aim *= combo_break
     aim *= ar_bonus
 
     hd_bonus = 1.0
-    if mods & MODS_HD != 0:
-        hd_bonus *= 1.0 + 0.04 * (12.0 - ar)
+    if mods & MODS_HD:
+        hd_bonus = 1.0 + 0.04 * (12.0 - ar)
+        aim *= hd_bonus
 
-    aim *= hd_bonus
-
-    if mods & MODS_FL != 0:
+    if mods & MODS_FL:
         fl_bonus = 1.0 + 0.35 * min(1.0, nobjects / 200.0)
         if nobjects > 200:
-            fl_bonus += 0.3 * min(1, (nobjects - 200) / 300.0)
+            fl_bonus += 0.3 * min(1.0, (nobjects - 200) / 300.0)
         if nobjects > 500:
             fl_bonus += (nobjects - 500) / 1200.0
         aim *= fl_bonus
 
     acc_bonus = 0.5 + accuracy / 2.0
-    od_squared = od * od;
+    od_squared = od * od
     od_bonus = 0.98 + od_squared / 2500.0
 
     aim *= acc_bonus
@@ -1275,14 +1263,19 @@ def ppv2(
     # speed pp ----------------------------------------------------
     speed = pp_base(speed_stars)
     speed *= length_bonus
-    speed *= miss_penality
+    speed *= miss_penalty
     speed *= combo_break
     if ar > 10.33:
-        speed *= ar_bonus
+        speed *= 1 + min(ar_bonus, ar_bonus * (nobjects / 1000))
+
     speed *= hd_bonus
 
-    speed *= 0.02 + accuracy
-    speed *= 0.96 + od_squared / 1600.0
+    speed *= (0.95 + (od_squared / 750)) * (pow(accuracy, (14.5 - max(od, 8.0)) / 2))
+    if n50 < nobjects / 500:
+        negative_50 = 0
+    else:
+        negative_50 = n50 - nobjects / 500
+    speed *= pow(0.98, negative_50)
 
     # acc pp ------------------------------------------------------
     acc = pow(1.52163, od) * pow(real_acc, 24.0) * 2.83
@@ -1299,11 +1292,11 @@ def ppv2(
     # total pp ----------------------------------------------------
     final_multiplier = 1.12
 
-    if mods & MODS_NF != 0:
-        final_multiplier *= 0.90
+    if mods & MODS_NF:
+        final_multiplier *= max(0.9, 1 - 0.02 * nmiss)
 
-    if mods & MODS_SO != 0:
-        final_multiplier *= 0.95
+    if mods & MODS_SO:
+        final_multiplier *= 1 - pow(nspinners / nobjects, 0.85)
 
     total = (
         pow(
